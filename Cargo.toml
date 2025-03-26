@@ -1,0 +1,7 @@
+[package]
+name = "ground-station"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+flight-builder = { git = "https://github.com/purdue-orbital/flight-builder.git" }
