@@ -1,3 +1,9 @@
+// references
+// ublox
+// https://github.com/ublox-rs/ublox/blob/master/examples/send-receive/src/main.rs#L8
+// servo control
+// https://github.com/rp-rs/rp-hal-boards/blob/HEAD/boards/rp-pico/examples/pico_pwm_servo.rs
+
 use flight_builder::prelude::*;
 use rand::random;
 
