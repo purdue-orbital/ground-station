@@ -1,11 +1,21 @@
 use flight_builder::prelude::*;
 use rand::random;
+
+// crates for ublox control
 use chrono::prelude::*;
 use serialport::SerialPort;
 use std::convert::TryInto;
 use std::thread;
 use std::time::Duration;
 use ublox::*;
+
+// crates for pico control
+use cortex_m::prelude::*;
+use embedded_hal::pwm::SetDutyCycle;
+use fugit::ExtU32;
+use panic_halt as _;
+use rp_pico::hal::pac;
+use rp_pico::hal;
 
 pub struct SensorReadings {
     pub bar: f32,
@@ -78,6 +88,10 @@ fn check_position(mut position_readings: ResMut<PositionReadings>) {
   position_readings.alt = pos.alt;
 }
 
+fn set_position(setting: i8) {
+  let _ = channel.set_duty_cycle(setting);
+}
+
 fn print_readings(readings: Res<PositionReadings>) {
     println!(
         "Latitude: {} Longitude: {} Altitude: {}",
@@ -105,6 +119,59 @@ fn main() {
     // Start reading data
     println!("Opened uBlox device, waiting for messages...");
 
+    // PWM control setup
+
+    // Grab our singleton objects
+    let mut pac = pac::Peripherals::take().unwrap();
+
+    // Set up the watchdog driver - needed by the clock setup code
+    let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+
+    // Configure the clocks
+    //
+    // The default is to generate a 125 MHz system clock
+    let clocks = hal::clocks::init_clocks_and_plls(
+        rp_pico::XOSC_CRYSTAL_FREQ,
+        pac.XOSC,
+        pac.CLOCKS,
+        pac.PLL_SYS,
+        pac.PLL_USB,
+        &mut pac.RESETS,
+        &mut watchdog,
+    )
+    .ok()
+    .unwrap();
+
+    // Configure the Timer peripheral in count-down mode
+    let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    let mut count_down = timer.count_down();
+
+    // The single-cycle I/O block controls our GPIO pins
+    let sio = hal::Sio::new(pac.SIO);
+
+    // Set the pins up according to their function on this particular board
+    let pins = rp_pico::Pins::new(
+        pac.IO_BANK0,
+        pac.PADS_BANK0,
+        sio.gpio_bank0,
+        &mut pac.RESETS,
+    );
+
+    // Init PWMs
+    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+
+    // Configure PWM0
+    let pwm = &mut pwm_slices.pwm0;
+    pwm.set_ph_correct();
+    pwm.set_div_int(20u8); // 50 hz
+    pwm.enable();
+
+    // Output channel B on PWM0 to the GPIO1 pin
+    let channel = &mut pwm.channel_b;
+    channel.output_to(pins.gpio1);
+
+    // end of device setup
+
     let mut s = Scheduler::default();
 
     // Add pop timer resource
@@ -123,11 +190,8 @@ fn main() {
       alt: 0.0
     });
 
-    // Add a task that pops a balloon that runs at 1 hz (1/1)
-    s.add_task(Schedule::Update(1.0), pop_check);
-
     // Add a task that updates sensor readings at 100hz
-    s.add_task(Schedule::Update(1.0 / 100.0), check_sensors);
+    s.add_task(Schedule::Update(1.0 / 100.0), check_position);
 
     // Print readings every 5 seconds
     s.add_task(Schedule::Update(5.0), print_readings);
